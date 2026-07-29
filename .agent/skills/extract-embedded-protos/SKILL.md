@@ -14,7 +14,7 @@ Recover protobuf schemas from a binary with the bundled deterministic Go extract
 3. From the project root, run the Go command with exactly two positional arguments:
 
 ```sh
-go run . \
+go run ./cmd/protoextract \
   /absolute/path/to/source-binary \
   /absolute/path/to/output-directory
 ```
@@ -54,7 +54,7 @@ protoc \
 Run the project Go tests before modifying extractor behavior:
 
 ```sh
-go test -race ./...
+go test -race ./cmd/protoextract
 go vet ./...
 ```
 

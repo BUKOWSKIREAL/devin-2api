@@ -1,42 +1,57 @@
-# protoextract
+# cha-k
 
-`protoextract` scans a compiled Go binary for embedded `FileDescriptorProto`
-messages and reconstructs every descriptor it can recover.
+`cha-k` is a Go service under development for translating a provider-independent
+conversation model to these compatible HTTP APIs:
 
-## Usage
+- OpenAI `/v1/chat/completions`
+- OpenAI `/v1/responses`
+- Anthropic `/v1/messages`
+
+The compatibility endpoints are not implemented yet. The current root command
+only provides the new HTTP service entry and `GET /healthz`.
+
+## Layout
+
+- `internal/llm`: provider-independent request messages, response messages, and
+  streaming events derived from Pi's common type layer.
+- `cmd/protoextract`: side command for recovering embedded protobuf descriptors
+  from a compiled Go binary.
+- `pi`: Git submodule used as the reference implementation for the common
+  message model.
+
+Initialize the reference submodule after cloning:
 
 ```sh
-go build -o protoextract .
-./protoextract /path/to/language_server /path/to/output
+git submodule update --init --depth 1
 ```
 
-The command accepts exactly two positional arguments: the source binary and the
-output directory. Before extraction, the output directory is deleted in full
-and recreated. Do not point it at a directory containing unrelated files.
+## Service entry
 
-## Outputs
+```sh
+go run .
+```
+
+The service listens on `:8080` by default. Set `LISTEN_ADDR` to override it.
+
+## Proto extractor
+
+```sh
+go build -o bin/protoextract ./cmd/protoextract
+./bin/protoextract /path/to/language_server /path/to/output
+```
+
+The extractor accepts exactly two positional arguments: the source binary and
+the output directory. Before extraction, the output directory is deleted in
+full and recreated. Do not point it at a directory containing unrelated files.
+
+It creates:
 
 - `all-protos.proto`: every recovered declaration flattened into one directly
-  compilable proto file. The `exa.api_server_pb` package is retained when it is
-  present, while symbols from other packages receive deterministic prefixes.
+  compilable proto file.
 - `descriptors.pb`: the complete machine-readable `FileDescriptorSet`.
-- `manifest.json`: file counts, comment coverage, missing dependencies, caveats,
-  and mappings from original fully-qualified symbols to flattened names.
+- `manifest.json`: extraction counts, comment coverage, missing dependencies,
+  caveats, and original-to-flattened symbol mappings.
 
-The flattened file uses proto2 syntax so a mixed proto2/proto3 input set can
-retain required fields, extensions, maps, oneofs, and packed wire encoding in a
-single syntax. It is a wire-compatible analysis view, not a replacement for the
-original generated API: non-root service paths and type names change, and
-proto3 presence/open-enum behavior cannot be represented exactly. Use
-`descriptors.pb` whenever the original file boundaries, packages, options, or
-generated API semantics matter.
-
-## Comments
-
-Proto comments exist in compiled descriptors only when the producer retained
-`FileDescriptorProto.source_code_info`. When present, leading, trailing, and
-detached comments attached to declarations are remapped into the flattened
-file. Comments attached only to removed imports, package declarations, syntax,
-or custom options are retained as file-level provenance comments. When the
-binary stripped source information, original comments cannot be recovered;
-`manifest.json` reports zero comment locations instead of inventing comments.
+The flattened file is a wire-compatible analysis view, not a replacement for
+the original generated API. Use `descriptors.pb` when original file boundaries,
+packages, options, or generated API semantics matter.

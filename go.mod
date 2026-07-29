@@ -1,4 +1,4 @@
-module local/protoextract
+module github.com/leookun/cha-k
 
 go 1.24
 
