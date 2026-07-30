@@ -1,3 +1,4 @@
+// 本文件负责将恢复的 protobuf 描述符展平为单个可编译的 proto 文件。
 package main
 
 import (

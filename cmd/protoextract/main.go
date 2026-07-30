@@ -1,3 +1,4 @@
+// 本文件提供从编译后的 Go 二进制提取 protobuf 描述符的命令行入口。
 package main
 
 import (

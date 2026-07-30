@@ -1,3 +1,4 @@
+// 本文件验证 protobuf 描述符提取命令的候选发现和输出行为。
 package main
 
 import (

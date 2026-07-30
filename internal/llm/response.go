@@ -1,3 +1,5 @@
+// 本文件定义助手聚合响应、用量、诊断信息和增量响应事件。
+//
 // agent loop 的语义等价，不是 Provider 响应结构等价
 package llm
 

@@ -7,8 +7,9 @@ conversation model to these compatible HTTP APIs:
 - OpenAI `/v1/responses`
 - Anthropic `/v1/messages`
 
-The compatibility endpoints are not implemented yet. The current root command
-only provides the new HTTP service entry and `GET /healthz`.
+The HTTP service entry provides `GET /healthz` and `POST /v1/responses`. The
+Responses route is wired to an adapter boundary; the concrete upstream provider
+adapter is not configured yet.
 
 ## Layout
 
@@ -28,10 +29,12 @@ git submodule update --init --depth 1
 ## Service entry
 
 ```sh
-go run .
+go run ./cmd/cha-k --config ./config.yaml
 ```
 
-The service listens on `:8080` by default. Set `LISTEN_ADDR` to override it.
+All service settings come from YAML. The service does not use environment
+variables or hot reload. Copy `config.example.yaml` when creating a new
+deployment configuration.
 
 ## Proto extractor
 
