@@ -10,24 +10,44 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/leookun/cha-k/internal/adapter"
+	"github.com/leookun/cha-k/internal/adapter/devin"
 	"github.com/leookun/cha-k/internal/app"
 	"github.com/leookun/cha-k/internal/config"
+	"github.com/leookun/cha-k/internal/debuglog"
 )
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "YAML 配置文件路径")
 	flag.Parse()
 
-	serviceConfig, err := config.Load(*configPath)
+	absoluteConfigPath, err := filepath.Abs(*configPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	serviceConfig, err := config.Load(absoluteConfigPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	application := app.New(adapter.Unavailable{Reason: "provider adapter is not configured"}, serviceConfig.Server)
+	providerAdapter := adapter.Adapter(adapter.Unavailable{Reason: "provider adapter is not configured"})
+	if serviceConfig.Devin.Token != "" {
+		configured, createErr := devin.New(devin.Config{
+			BaseURL: serviceConfig.Devin.BaseURL,
+			Token:   serviceConfig.Devin.Token,
+			Model:   serviceConfig.Devin.Model,
+		})
+		if createErr != nil {
+			log.Fatal(createErr)
+		}
+		providerAdapter = configured
+	}
+	debugManager := debuglog.NewManager(filepath.Join(filepath.Dir(absoluteConfigPath), "logs"))
+	application := app.New(providerAdapter, serviceConfig.Server, debugManager)
 	server := application.HTTPServer()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

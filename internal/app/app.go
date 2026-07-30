@@ -16,6 +16,7 @@ import (
 	"github.com/leookun/cha-k/internal/adapter"
 	"github.com/leookun/cha-k/internal/api/openai/responses"
 	"github.com/leookun/cha-k/internal/config"
+	"github.com/leookun/cha-k/internal/debuglog"
 	"github.com/leookun/cha-k/internal/llm"
 )
 
@@ -32,11 +33,13 @@ type App struct {
 	adapter adapter.Adapter
 	// serverConfig 是 HTTP 服务运行配置。
 	serverConfig config.ServerConfig
+	// debugManager 为每次兼容 API 请求创建独立的写盘日志。
+	debugManager *debuglog.Manager
 }
 
 // New 创建一个使用指定供应商适配器的 HTTP 应用。
-func New(providerAdapter adapter.Adapter, serverConfig config.ServerConfig) *App {
-	return &App{adapter: providerAdapter, serverConfig: serverConfig}
+func New(providerAdapter adapter.Adapter, serverConfig config.ServerConfig, debugManager *debuglog.Manager) *App {
+	return &App{adapter: providerAdapter, serverConfig: serverConfig, debugManager: debugManager}
 }
 
 // Router 返回应用的 chi HTTP 路由。
@@ -63,76 +66,121 @@ func (application *App) health(writer http.ResponseWriter, _ *http.Request) {
 }
 
 func (application *App) createResponses(writer http.ResponseWriter, request *http.Request) {
+	recorder := application.debugManager.Start(debuglog.RequestMeta{Method: request.Method, Path: request.URL.Path})
+	completion := debuglog.Completion{StatusCode: http.StatusInternalServerError, Result: "failed"}
+	defer func() { recorder.Complete(completion) }()
+
 	if application.adapter == nil {
-		writeError(writer, http.StatusServiceUnavailable, "provider adapter is not configured")
+		completion.StatusCode = http.StatusServiceUnavailable
+		writeLoggedError(writer, recorder, "provider_configuration", completion.StatusCode, errors.New("provider adapter is not configured"))
 		return
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, 8<<20))
 	if err != nil {
-		writeError(writer, http.StatusBadRequest, fmt.Sprintf("read request: %v", err))
+		completion.StatusCode = http.StatusBadRequest
+		writeLoggedError(writer, recorder, "http_read", completion.StatusCode, fmt.Errorf("read request: %w", err))
 		return
 	}
+	recorder.WriteJSON("01-http-request.json", httpRequestProjection(request, body))
 	adapted, err := responses.DecodeRequest(body)
 	if err != nil {
-		writeError(writer, http.StatusBadRequest, err.Error())
+		completion.StatusCode = http.StatusBadRequest
+		writeLoggedError(writer, recorder, "http_decode", completion.StatusCode, err)
 		return
 	}
-	stream, err := application.adapter.Stream(request.Context(), adapted.Context)
+	completion.Model = adapted.Options.Model
+	completion.Stream = adapted.Options.Stream
+	recorder.WriteJSON("02-request-messages.json", debuglog.RequestMessagesProjection(adapted.Context))
+	ctx := debuglog.WithRecorder(request.Context(), recorder)
+	stream, err := application.adapter.Stream(ctx, adapted.Context)
 	if err != nil {
-		writeError(writer, http.StatusBadGateway, err.Error())
+		completion.StatusCode = http.StatusBadGateway
+		writeLoggedError(writer, recorder, "provider_stream", completion.StatusCode, err)
 		return
 	}
 	if adapted.Options.Stream {
-		if err := writeSSE(request.Context(), writer, stream); err != nil {
+		completion.StatusCode = http.StatusOK
+		message, streamErr := writeSSE(ctx, writer, stream, recorder, adapted.Options.Model)
+		updateCompletionIdentity(&completion, message)
+		if streamErr != nil {
+			if errors.Is(streamErr, context.Canceled) || errors.Is(streamErr, context.DeadlineExceeded) {
+				completion.Result = "disconnected"
+				recorder.WriteError("client_disconnected", streamErr)
+			} else {
+				recorder.WriteError("http_stream", streamErr)
+			}
 			return
 		}
+		completion.Result = "completed"
 		return
 	}
-	message, err := collectFinalMessage(request.Context(), stream)
+	message, err := collectFinalMessage(ctx, stream, recorder)
 	if err != nil {
-		writeError(writer, http.StatusBadGateway, err.Error())
+		completion.StatusCode = http.StatusBadGateway
+		writeLoggedError(writer, recorder, "response_event", completion.StatusCode, err)
 		return
 	}
+	updateCompletionIdentity(&completion, message)
 	body, err = responses.EncodeResponse(message)
 	if err != nil {
-		writeError(writer, http.StatusInternalServerError, err.Error())
+		completion.StatusCode = http.StatusInternalServerError
+		writeLoggedError(writer, recorder, "http_encode", completion.StatusCode, err)
 		return
 	}
 	writer.Header().Set("Content-Type", "application/json")
-	_, _ = writer.Write(body)
+	if _, err := writer.Write(body); err != nil {
+		completion.Result = "disconnected"
+		recorder.WriteError("client_disconnected", err)
+		return
+	}
+	recorder.AppendJSONL("06-http-response.jsonl", "response", json.RawMessage(body))
+	completion.StatusCode = http.StatusOK
+	completion.Result = "completed"
 }
 
-func writeSSE(ctx context.Context, writer http.ResponseWriter, stream llm.ResponseStream) error {
+func writeSSE(ctx context.Context, writer http.ResponseWriter, stream llm.ResponseStream, recorder *debuglog.Recorder, model string) (*llm.AssistantMessage, error) {
 	flusher, ok := writer.(http.Flusher)
 	if !ok {
-		return errors.New("streaming response writer does not support flushing")
+		return nil, errors.New("streaming response writer does not support flushing")
 	}
 	writer.Header().Set("Content-Type", "text/event-stream")
 	writer.Header().Set("Cache-Control", "no-cache")
 	writer.Header().Set("Connection", "keep-alive")
+	encoder := responses.NewStreamEncoder(model)
+	var latest *llm.AssistantMessage
 	for {
-		event, err := stream.Recv(ctx)
+		event, err := receiveEvent(ctx, stream, recorder)
 		if errors.Is(err, io.EOF) {
-			return nil
+			return latest, nil
 		}
 		if err != nil {
-			return err
+			return latest, err
 		}
-		encoded, err := responses.EncodeEvent(event)
+		latest = eventMessage(event, latest)
+		encodedEvents, err := encoder.Encode(event)
 		if err != nil {
-			return err
+			return latest, err
 		}
-		if _, err := fmt.Fprintf(writer, "event: %s\ndata: %s\n\n", encoded.Name, encoded.Data); err != nil {
-			return err
+		for _, encoded := range encodedEvents {
+			if _, err := fmt.Fprintf(writer, "event: %s\ndata: %s\n\n", encoded.Name, encoded.Data); err != nil {
+				return latest, err
+			}
+			recorder.AppendJSONL("06-http-response.jsonl", encoded.Name, json.RawMessage(encoded.Data))
+			flusher.Flush()
 		}
-		flusher.Flush()
+		if event.Type == llm.ResponseEventError {
+			if event.Error != nil && event.Error.ErrorMessage != "" {
+				return latest, errors.New(event.Error.ErrorMessage)
+			}
+			return latest, errors.New("response stream returned an error event")
+		}
 	}
 }
 
-func collectFinalMessage(ctx context.Context, stream llm.ResponseStream) (*llm.AssistantMessage, error) {
+func collectFinalMessage(ctx context.Context, stream llm.ResponseStream, recorder *debuglog.Recorder) (*llm.AssistantMessage, error) {
 	var final *llm.AssistantMessage
 	for {
-		event, err := stream.Recv(ctx)
+		event, err := receiveEvent(ctx, stream, recorder)
 		if errors.Is(err, io.EOF) {
 			if final == nil {
 				return nil, errors.New("response stream ended without a final message")
@@ -157,10 +205,61 @@ func collectFinalMessage(ctx context.Context, stream llm.ResponseStream) (*llm.A
 	}
 }
 
-func writeError(writer http.ResponseWriter, status int, message string) {
+func receiveEvent(ctx context.Context, stream llm.ResponseStream, recorder *debuglog.Recorder) (llm.ResponseEvent, error) {
+	event, err := stream.Recv(ctx)
+	if err == nil {
+		recorder.AppendJSONL("05-response-events.jsonl", string(event.Type), debuglog.ResponseEventProjection(event))
+	}
+	return event, err
+}
+
+func eventMessage(event llm.ResponseEvent, fallback *llm.AssistantMessage) *llm.AssistantMessage {
+	if event.Message != nil {
+		return event.Message
+	}
+	if event.Error != nil {
+		return event.Error
+	}
+	if event.Partial != nil {
+		return event.Partial
+	}
+	return fallback
+}
+
+func updateCompletionIdentity(completion *debuglog.Completion, message *llm.AssistantMessage) {
+	if message == nil {
+		return
+	}
+	completion.Provider = message.Provider
+	if message.ResponseModel != "" {
+		completion.Model = message.ResponseModel
+	} else if message.Model != "" {
+		completion.Model = message.Model
+	}
+}
+
+func httpRequestProjection(request *http.Request, body []byte) map[string]any {
+	var parsedBody any
+	if err := json.Unmarshal(body, &parsedBody); err != nil {
+		parsedBody = string(body)
+	}
+	return map[string]any{
+		"method": request.Method,
+		"path":   request.URL.Path,
+		"headers": map[string]string{
+			"accept":       request.Header.Get("Accept"),
+			"content_type": request.Header.Get("Content-Type"),
+			"user_agent":   request.Header.Get("User-Agent"),
+		},
+		"body": parsedBody,
+	}
+}
+
+func writeLoggedError(writer http.ResponseWriter, recorder *debuglog.Recorder, stage string, status int, err error) {
+	recorder.WriteError(stage, err)
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(status)
-	_ = json.NewEncoder(writer).Encode(map[string]any{
-		"error": map[string]string{"message": message, "type": "server_error"},
-	})
+	response := map[string]any{"error": map[string]string{"message": err.Error(), "type": "server_error"}}
+	_ = json.NewEncoder(writer).Encode(response)
+	recorder.AppendJSONL("06-http-response.jsonl", "error", response)
 }

@@ -85,9 +85,9 @@ func DecodeRequest(data []byte) (AdaptedRequest, error) {
 	if err := appendInputMessages(&context, request.Input); err != nil {
 		return AdaptedRequest{}, err
 	}
-	for index, tool := range request.Tools {
+	for _, tool := range request.Tools {
 		if tool.Type != "function" {
-			return AdaptedRequest{}, fmt.Errorf("tools[%d]: unsupported tool type %q", index, tool.Type)
+			continue
 		}
 		schema := tool.Parameters
 		if len(schema) == 0 {
@@ -146,6 +146,9 @@ func appendInputItem(context *llm.RequestMessages, raw json.RawMessage) error {
 	if err := json.Unmarshal(raw, &header); err != nil {
 		return fmt.Errorf("decode input item: %w", err)
 	}
+	if header.Type == "" && header.Role != "" {
+		header.Type = "message"
+	}
 	switch header.Type {
 	case "message":
 		return appendMessageItem(context, raw, header.Role)
@@ -189,7 +192,7 @@ func appendInputItem(context *llm.RequestMessages, raw json.RawMessage) error {
 		})
 		return nil
 	default:
-		return fmt.Errorf("unsupported input item type %q", header.Type)
+		return nil
 	}
 }
 
@@ -210,15 +213,23 @@ func findToolName(messages []llm.Message, callID string) string {
 }
 
 func appendMessageItem(context *llm.RequestMessages, raw json.RawMessage, role string) error {
+	switch role {
+	case "user", "assistant", "system", "developer":
+	default:
+		return nil
+	}
 	var item struct {
 		Content json.RawMessage `json:"content"`
 	}
 	if err := json.Unmarshal(raw, &item); err != nil {
 		return err
 	}
-	content, err := decodeMessageContent(item.Content, role)
+	content, err := decodeMessageContent(item.Content)
 	if err != nil {
 		return err
+	}
+	if len(content) == 0 {
+		return nil
 	}
 	switch role {
 	case "user":
@@ -231,13 +242,11 @@ func appendMessageItem(context *llm.RequestMessages, raw json.RawMessage, role s
 			context.SystemPrompt += "\n"
 		}
 		context.SystemPrompt += text
-	default:
-		return fmt.Errorf("unsupported message role %q", role)
 	}
 	return nil
 }
 
-func decodeMessageContent(raw json.RawMessage, role string) ([]llm.Content, error) {
+func decodeMessageContent(raw json.RawMessage) ([]llm.Content, error) {
 	var text string
 	if json.Unmarshal(raw, &text) == nil {
 		return []llm.Content{llm.TextContent{Text: text}}, nil
@@ -266,7 +275,7 @@ func decodeMessageContent(raw json.RawMessage, role string) ([]llm.Content, erro
 			}
 			content = append(content, image)
 		default:
-			return nil, fmt.Errorf("content[%d]: unsupported type %q for role %q", index, item.Type, role)
+			continue
 		}
 	}
 	return content, nil

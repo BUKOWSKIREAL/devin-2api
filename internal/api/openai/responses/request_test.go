@@ -92,3 +92,67 @@ func TestDecodeRequestRetainsRawSchema(t *testing.T) {
 		t.Fatalf("schema = %#v", schema)
 	}
 }
+
+// TestDecodeRequestAcceptsMessageWithoutType 的测试动机是覆盖 OpenAI 官方示例和 SDK 发送的 role 加 content 简写。
+func TestDecodeRequestAcceptsMessageWithoutType(t *testing.T) {
+	data := []byte(`{
+  "model": "glm-5.2",
+  "input": [{
+    "role": "user",
+    "content": [{"type":"input_text","text":"hello"}]
+  }],
+  "stream": true
+}`)
+	request, err := DecodeRequest(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(request.Context.Messages) != 1 {
+		t.Fatalf("message count = %d, want 1", len(request.Context.Messages))
+	}
+	message, ok := request.Context.Messages[0].(llm.UserMessage)
+	if !ok {
+		t.Fatalf("message type = %T, want llm.UserMessage", request.Context.Messages[0])
+	}
+	text, ok := message.Content[0].(llm.TextContent)
+	if !ok || text.Text != "hello" {
+		t.Fatalf("message content = %#v", message.Content)
+	}
+}
+
+// TestDecodeRequestIgnoresUnsupportedExtensions 的测试动机是确保上游新增字段和类型不会阻断可识别的对话内容。
+func TestDecodeRequestIgnoresUnsupportedExtensions(t *testing.T) {
+	request, err := DecodeRequest([]byte(`{
+  "model":"model",
+  "client_metadata":{"client":"codex"},
+  "input":[
+    {"type":"additional_tools","role":"developer","tools":[{"name":"unknown"}]},
+    {"content":"untyped extension"},
+    {"type":"message","role":"future_role","content":"ignored"},
+    {"type":"message","role":"user","content":[
+      {"type":"future_content","value":"ignored"},
+      {"type":"input_text","text":"hello"}
+    ]}
+  ],
+  "tools":[
+    {"type":"web_search_preview"},
+    {"type":"function","name":"known","parameters":{"type":"object"}}
+  ]
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(request.Context.Messages) != 1 {
+		t.Fatalf("message count = %d, want 1", len(request.Context.Messages))
+	}
+	message, ok := request.Context.Messages[0].(llm.UserMessage)
+	if !ok {
+		t.Fatalf("message type = %T, want llm.UserMessage", request.Context.Messages[0])
+	}
+	if len(message.Content) != 1 || message.Content[0].(llm.TextContent).Text != "hello" {
+		t.Fatalf("message content = %#v", message.Content)
+	}
+	if len(request.Context.Tools) != 1 || request.Context.Tools[0].Name != "known" {
+		t.Fatalf("tools = %#v", request.Context.Tools)
+	}
+}

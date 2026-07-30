@@ -15,12 +15,24 @@ import (
 type Config struct {
 	// Server 保存 HTTP 服务配置。
 	Server ServerConfig `yaml:"server"`
+	// Devin 保存 Devin Connect 上游配置。
+	Devin DevinConfig `yaml:"devin"`
 }
 
 // ServerConfig 保存 HTTP 服务监听配置。
 type ServerConfig struct {
 	// Listen 是 HTTP 服务监听地址。
 	Listen string `yaml:"listen"`
+}
+
+// DevinConfig 保存 Devin Connect 上游调用配置。
+type DevinConfig struct {
+	// BaseURL 是 Devin Connect 服务的基础地址。
+	BaseURL string `yaml:"base_url"`
+	// Token 是 Devin session token；不会写入日志。
+	Token string `yaml:"token"`
+	// Model 是 Devin chat model UID。
+	Model string `yaml:"model"`
 }
 
 // Load 从 YAML 文件读取并校验配置。

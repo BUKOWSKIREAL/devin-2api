@@ -180,6 +180,10 @@ type ResponseEvent struct {
 	Content string
 	// Partial 是处理本事件后累计形成的助手消息，包含当前累计用量。
 	Partial *AssistantMessage
+	// ToolCallID 是工具调用开始和参数增量事件关联的稳定调用标识。
+	ToolCallID string
+	// ToolName 是工具调用开始事件声明的工具名称。
+	ToolName string
 	// ToolCall 是工具调用结束时已经解析完成的调用对象。
 	ToolCall *ToolCall
 	// Reason 是完成或失败事件的停止原因。
@@ -195,8 +199,19 @@ func (event ResponseEvent) Validate() error {
 	switch event.Type {
 	case ResponseEventStart:
 		return requirePartial(event)
-	case ResponseEventTextStart, ResponseEventThinkingStart, ResponseEventToolCallStart:
+	case ResponseEventTextStart, ResponseEventThinkingStart:
 		return requireIndexedPartial(event)
+	case ResponseEventToolCallStart:
+		if err := requireIndexedPartial(event); err != nil {
+			return err
+		}
+		if event.ToolCallID == "" {
+			return errors.New("tool call start event requires a tool call ID")
+		}
+		if event.ToolName == "" {
+			return errors.New("tool call start event requires a tool name")
+		}
+		return nil
 	case ResponseEventTextDelta, ResponseEventThinkingDelta:
 		if err := requireIndexedPartial(event); err != nil {
 			return err
@@ -206,7 +221,13 @@ func (event ResponseEvent) Validate() error {
 		}
 		return nil
 	case ResponseEventToolCallDelta:
-		return requireIndexedPartial(event)
+		if err := requireIndexedPartial(event); err != nil {
+			return err
+		}
+		if event.ToolCallID == "" {
+			return errors.New("tool call delta event requires a tool call ID")
+		}
+		return nil
 	case ResponseEventTextEnd, ResponseEventThinkingEnd:
 		return requireIndexedPartial(event)
 	case ResponseEventToolCallEnd:

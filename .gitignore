@@ -3,6 +3,7 @@
 /protoextract
 /bin/
 /work/
+/logs/
 
 coverage.out
 *.test

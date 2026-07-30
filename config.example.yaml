@@ -1,2 +1,7 @@
 server:
   listen: ":8080"
+
+devin:
+  base_url: "https://server.codeium.com"
+  token: ""
+  model: "glm-5-2"

@@ -35,8 +35,8 @@ func TestResponseEventProtocolCarriesPartialUsageAndFinalMessage(t *testing.T) {
 		{Type: ResponseEventThinkingStart, ContentIndex: 1, Partial: partial},
 		{Type: ResponseEventThinkingDelta, ContentIndex: 1, Delta: "需要工具", Partial: partial},
 		{Type: ResponseEventThinkingEnd, ContentIndex: 1, Content: "需要工具", Partial: partial},
-		{Type: ResponseEventToolCallStart, ContentIndex: 2, Partial: partial},
-		{Type: ResponseEventToolCallDelta, ContentIndex: 2, Delta: `{"path":`, Partial: partial},
+		{Type: ResponseEventToolCallStart, ContentIndex: 2, ToolCallID: toolCall.ID, ToolName: toolCall.Name, Partial: partial},
+		{Type: ResponseEventToolCallDelta, ContentIndex: 2, ToolCallID: toolCall.ID, Delta: `{"path":`, Partial: partial},
 		{Type: ResponseEventToolCallEnd, ContentIndex: 2, ToolCall: toolCall, Partial: partial},
 		{Type: ResponseEventDone, Reason: StopReasonToolUse, Message: final},
 	}
@@ -55,16 +55,31 @@ func TestResponseEventRejectsDoneWithoutFinalMessage(t *testing.T) {
 	}
 }
 
+// TestResponseEventAllowsEmptyToolCallDelta 的测试动机是允许供应商发送空参数片段，同时保留调用关联标识。
 func TestResponseEventAllowsEmptyToolCallDelta(t *testing.T) {
 	partial := &AssistantMessage{StopReason: StopReasonPending}
 	event := ResponseEvent{
 		Type:         ResponseEventToolCallDelta,
 		ContentIndex: 0,
+		ToolCallID:   "call-1",
 		Delta:        "",
 		Partial:      partial,
 	}
 
 	if err := event.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v, want empty tool call delta to be valid", err)
+	}
+}
+
+// TestResponseEventRejectsToolCallDeltaWithoutID 的测试动机是避免并行工具参数流失去稳定关联。
+func TestResponseEventRejectsToolCallDeltaWithoutID(t *testing.T) {
+	event := ResponseEvent{
+		Type:         ResponseEventToolCallDelta,
+		ContentIndex: 0,
+		Delta:        `{}`,
+		Partial:      &AssistantMessage{StopReason: StopReasonPending},
+	}
+	if err := event.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want missing tool call ID error")
 	}
 }
