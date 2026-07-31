@@ -1,0 +1,14 @@
+.git
+.agent
+.DS_Store
+bin
+logs
+pi
+work
+config.yaml
+coverage.out
+*.test
+
+outputs/*
+!outputs/devin-proto-go
+!outputs/devin-proto-go/**

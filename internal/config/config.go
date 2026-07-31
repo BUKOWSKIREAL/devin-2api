@@ -17,6 +17,8 @@ type Config struct {
 	Server ServerConfig `yaml:"server"`
 	// Devin 保存 Devin Connect 上游配置。
 	Devin DevinConfig `yaml:"devin"`
+	// Debug 保存仅用于本地诊断的日志配置。
+	Debug DebugConfig `yaml:"debug"`
 }
 
 // ServerConfig 保存 HTTP 服务监听配置。
@@ -33,6 +35,12 @@ type DevinConfig struct {
 	Token string `yaml:"token"`
 	// Model 是 Devin chat model UID。
 	Model string `yaml:"model"`
+}
+
+// DebugConfig 保存请求级调试日志配置。
+type DebugConfig struct {
+	// Enabled 表示是否在配置文件同目录的 logs 下写入请求调试日志。
+	Enabled bool `yaml:"enabled"`
 }
 
 // Load 从 YAML 文件读取并校验配置。

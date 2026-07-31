@@ -1,7 +1,11 @@
 server:
   listen: ":8085"
 
+debug:
+  enabled: false
+
 devin:
   base_url: "https://server.codeium.com"
   token: "devin-session-token$eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzZXNzaW9uX2lkIjoid2luZHN1cmYtc2Vzc2lvbi1hNDYwZjdjOGMzMzk0Y2RiODNiNWEyNTM1ZGM3MDc4MiJ9.7g_vCC7Kfc1FBLby7yNsMVxhH4Ywbv02bZo2eFsp1tk"
-  model: "swe-1-7"
+  # model: "swe-1-7"
+  model: "glm-5-2"

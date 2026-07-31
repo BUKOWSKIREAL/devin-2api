@@ -46,7 +46,10 @@ func main() {
 		}
 		providerAdapter = configured
 	}
-	debugManager := debuglog.NewManager(filepath.Join(filepath.Dir(absoluteConfigPath), "logs"))
+	var debugManager *debuglog.Manager
+	if serviceConfig.Debug.Enabled {
+		debugManager = debuglog.NewManager(filepath.Join(filepath.Dir(absoluteConfigPath), "logs"))
+	}
 	application := app.New(providerAdapter, serviceConfig.Server, debugManager)
 	server := application.HTTPServer()
 

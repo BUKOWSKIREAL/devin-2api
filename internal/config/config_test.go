@@ -32,3 +32,33 @@ func TestLoadParsesListenAddress(t *testing.T) {
 		t.Fatalf("Listen = %q, want :9090", config.Server.Listen)
 	}
 }
+
+// TestLoadDisablesDebugLoggingByDefault 的测试动机是保证生产配置未显式开启时不会写入请求内容。
+func TestLoadDisablesDebugLoggingByDefault(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("server:\n  listen: ':9090'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Debug.Enabled {
+		t.Fatal("Debug.Enabled = true, want disabled by default")
+	}
+}
+
+// TestLoadEnablesDebugLoggingExplicitly 的测试动机是保留排查协议问题时主动开启日志的能力。
+func TestLoadEnablesDebugLoggingExplicitly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("server:\n  listen: ':9090'\ndebug:\n  enabled: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.Debug.Enabled {
+		t.Fatal("Debug.Enabled = false, want explicitly enabled")
+	}
+}
