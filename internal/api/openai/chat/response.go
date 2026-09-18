@@ -22,7 +22,9 @@ type SSEEvent struct {
 
 // StreamEncoder 保存一次 Chat Completions 流的协议状态。
 type StreamEncoder struct {
-	model           string
+	model string
+	// modelReported 表示已收到上游报告的模型，防止被请求别名覆盖。
+	modelReported   bool
 	responseID      string
 	createdAt       int64
 	includeUsage    bool
@@ -95,6 +97,7 @@ func (encoder *StreamEncoder) Encode(event llm.ResponseEvent) ([]SSEEvent, error
 	if encoder.finished {
 		return nil, errors.New("chat completion stream is already done")
 	}
+	encoder.model, encoder.modelReported = common.ResolveStreamModel(encoder.model, encoder.modelReported, event)
 	switch event.Type {
 	case llm.ResponseEventStart:
 		return encoder.start(), nil
@@ -363,26 +366,23 @@ func messageToChat(message *llm.AssistantMessage) (map[string]any, []any) {
 }
 
 func chatUsage(usage llm.Usage) map[string]any {
-	reasoningTokens := int64(0)
-	if usage.Reasoning != nil {
-		reasoningTokens = *usage.Reasoning
-	}
 	inputTokens := usage.Input + usage.CacheRead + usage.CacheWrite
 	total := usage.TotalTokens
 	if total == 0 {
 		total = inputTokens + usage.Output
 	}
-	return map[string]any{
+	result := map[string]any{
 		"prompt_tokens":     inputTokens,
 		"completion_tokens": usage.Output,
 		"total_tokens":      total,
 		"prompt_tokens_details": map[string]any{
 			"cached_tokens": usage.CacheRead,
 		},
-		"completion_tokens_details": map[string]any{
-			"reasoning_tokens": reasoningTokens,
-		},
 	}
+	if usage.Reasoning != nil {
+		result["completion_tokens_details"] = map[string]any{"reasoning_tokens": *usage.Reasoning}
+	}
+	return result
 }
 
 func finishReason(reason llm.StopReason) any {

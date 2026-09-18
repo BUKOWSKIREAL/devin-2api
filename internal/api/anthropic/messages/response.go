@@ -22,13 +22,15 @@ type SSEEvent struct {
 
 // StreamEncoder 保存一次 Anthropic Messages 流的协议状态。
 type StreamEncoder struct {
-	model      string
-	messageID  string
-	finished   bool
-	index      int
-	blocks     []*contentBlockState
-	usage      llm.Usage
-	blockIndex int
+	model string
+	// modelReported 表示已收到上游报告的模型标识。
+	modelReported bool
+	messageID     string
+	finished      bool
+	index         int
+	blocks        []*contentBlockState
+	usage         llm.Usage
+	blockIndex    int
 }
 
 type contentBlockState struct {
@@ -83,6 +85,7 @@ func (encoder *StreamEncoder) Encode(event llm.ResponseEvent) ([]SSEEvent, error
 	if encoder.finished {
 		return nil, errors.New("anthropic message stream is already done")
 	}
+	encoder.model, encoder.modelReported = common.ResolveStreamModel(encoder.model, encoder.modelReported, event)
 	switch event.Type {
 	case llm.ResponseEventStart:
 		return encoder.start(event), nil

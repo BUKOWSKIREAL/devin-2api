@@ -381,15 +381,30 @@ func writeProtocolStream(
 	writer.Header().Set("Connection", "keep-alive")
 	encoder := protocol.NewStreamEncoder(model, options.IncludeUsage)
 	var latest *llm.AssistantMessage
+	completed := false
 	event, err := firstEvent, firstErr
 	for {
 		if errors.Is(err, io.EOF) {
-			return latest, nil
+			if completed {
+				return latest, nil
+			}
+			// 供应商事件流也必须显式完成，防止空 EOF 或部分事件被报为成功。
+			failed := &llm.AssistantMessage{Model: model, StopReason: llm.StopReasonError, ErrorMessage: "upstream event stream ended without a completion event"}
+			if latest != nil {
+				*failed = *latest
+				failed.StopReason = llm.StopReasonError
+				failed.ErrorMessage = "upstream event stream ended without a completion event"
+			}
+			event = llm.ResponseEvent{Type: llm.ResponseEventError, Reason: llm.StopReasonError, Error: failed}
+			err = nil
 		}
 		if err != nil {
 			return latest, err
 		}
 		latest = eventMessage(event, latest)
+		if event.Type == llm.ResponseEventDone {
+			completed = true
+		}
 		encodedEvents, encodeErr := encoder.Encode(event)
 		if encodeErr != nil {
 			return latest, encodeErr

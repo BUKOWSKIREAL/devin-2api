@@ -116,10 +116,18 @@ func (decoder *responseDecoder) finish(upstreamErr error) []llm.ResponseEvent {
 	}
 	reason := decoder.stopReason
 	if !decoder.hasStopReason {
+		// Connect 客户端已验证 EndStream 帧；模型 stop_reason 可省略。
+		// 工具调用仍须以 toolUse 结束，不能把已确认的工具回合标为普通正文结束。
 		reason = llm.StopReasonStop
+		if len(decoder.tools) > 0 {
+			reason = llm.StopReasonToolUse
+		}
 	}
 	if reason == llm.StopReasonError {
-		return decoder.fail(errors.New("Devin stopped with an error"))
+		return decoder.fail(errors.New("Devin returned an error, filtered, or unsupported stop reason"))
+	}
+	if reason == llm.StopReasonToolUse && len(decoder.tools) == 0 {
+		return decoder.fail(errors.New("Devin stopped for a tool call without returning a tool call"))
 	}
 	return decoder.complete(reason)
 }
@@ -324,15 +332,17 @@ func (decoder *responseDecoder) fail(err error) []llm.ResponseEvent {
 func mapStopReason(reason devinproto.ExaCodeiumCommonPb_StopReason) llm.StopReason {
 	switch reason {
 	case devinproto.ExaCodeiumCommonPb_StopReason_ExaCodeiumCommonPb_StopReason_STOP_REASON_MAX_TOKENS,
+		devinproto.ExaCodeiumCommonPb_StopReason_ExaCodeiumCommonPb_StopReason_STOP_REASON_MAX_NEWLINES,
 		devinproto.ExaCodeiumCommonPb_StopReason_ExaCodeiumCommonPb_StopReason_STOP_REASON_INCOMPLETE,
 		devinproto.ExaCodeiumCommonPb_StopReason_ExaCodeiumCommonPb_StopReason_STOP_REASON_PARTIAL:
 		// INCOMPLETE/PARTIAL 都表示模型没有生成完整回复，按长度截断处理。
 		return llm.StopReasonLength
 	case devinproto.ExaCodeiumCommonPb_StopReason_ExaCodeiumCommonPb_StopReason_STOP_REASON_FUNCTION_CALL:
 		return llm.StopReasonToolUse
-	case devinproto.ExaCodeiumCommonPb_StopReason_ExaCodeiumCommonPb_StopReason_STOP_REASON_ERROR:
-		return llm.StopReasonError
-	default:
+	case devinproto.ExaCodeiumCommonPb_StopReason_ExaCodeiumCommonPb_StopReason_STOP_REASON_STOP_PATTERN:
 		return llm.StopReasonStop
+	default:
+		// 未知值、过滤、数值错误以及不适用于聊天的停止原因不能伪装为正常完成。
+		return llm.StopReasonError
 	}
 }

@@ -520,7 +520,8 @@ type devinResponseReceiver interface {
 	Receive() bool
 	// Msg 返回最近一次成功取得的响应帧。
 	Msg() *devinproto.GetChatMessageResponse
-	// Err 返回流结束时的错误；正常 EOF 返回 nil。
+	// Err 仅在 Connect EndStream 帧已被校验且无协议错误时返回 nil。
+	// 不带 EndStream 的 HTTP EOF 必须返回错误；不能实现为普通 reader 的 EOF。
 	Err() error
 }
 

@@ -53,6 +53,23 @@ validator. Existing image-history restrictions remain.
 
 ## Kimi Code
 
+### Completion and streaming metadata
+
+- A clean Connect EndStream frame is required. Truncated HTTP/protobuf streams
+  and errors in terminal trailers never produce a successful completion. Model
+  `stop_reason` is optional on a valid Connect stream; its absence alone is not
+  evidence of truncation. Tool calls on such a stream end with `tool_calls`.
+- Unknown/filtered/error model stop reasons fail explicitly, and a tool stop
+  without an actual tool call fails. The HTTP event bridge also rejects EOF
+  without a completion event rather than silently closing the SSE stream.
+- When reasoning token usage is unknown, Chat `completion_tokens_details` and
+  Responses `output_tokens_details` are omitted. Explicit upstream zero remains
+  zero; no counts are estimated from thinking text.
+- Streaming starts with the routed model ID, not the client alias. If the upstream
+  later reports an actual model ID, subsequent Chat chunks and Responses terminal
+  objects use it. Earlier frames cannot be rewritten. Anthropic's `message_start`
+  uses the best identity known at that time; its protocol has no later model field.
+
 The container log records a `devin_route` JSON line per upstream routing attempt:
 `client_model`, `reasoning_effort`, `upstream_model`, and `status`. Empty effort
 means the client supplied no explicit nonempty effort. `selected` records the

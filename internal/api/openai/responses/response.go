@@ -25,6 +25,8 @@ type SSEEvent struct {
 type StreamEncoder struct {
 	// model 是对外 Responses 请求使用的模型标识。
 	model string
+	// modelReported 表示已收到上游报告的模型标识。
+	modelReported bool
 	// responseID 是本次 HTTP Response 的稳定 resp_ 标识。
 	responseID string
 	// createdAt 是 Response 创建时的 Unix 秒时间戳。
@@ -112,6 +114,7 @@ func (encoder *StreamEncoder) Encode(event llm.ResponseEvent) ([]SSEEvent, error
 	if encoder.completed {
 		return nil, fmt.Errorf("response stream is already completed")
 	}
+	encoder.model, encoder.modelReported = common.ResolveStreamModel(encoder.model, encoder.modelReported, event)
 	switch event.Type {
 	case llm.ResponseEventStart:
 		return encoder.start(), nil
@@ -425,24 +428,23 @@ func baseResponse(id string, model string, createdAt int64, status string) map[s
 }
 
 func responseUsage(usage llm.Usage) map[string]any {
-	reasoningTokens := int64(0)
-	if usage.Reasoning != nil {
-		reasoningTokens = *usage.Reasoning
-	}
 	inputTokens := usage.Input + usage.CacheRead + usage.CacheWrite
 	total := usage.TotalTokens
 	if total == 0 {
 		total = inputTokens + usage.Output
 	}
-	return map[string]any{
+	result := map[string]any{
 		"input_tokens": inputTokens,
 		"input_tokens_details": map[string]any{
 			"cached_tokens": usage.CacheRead, "cache_write_tokens": usage.CacheWrite,
 		},
-		"output_tokens":         usage.Output,
-		"output_tokens_details": map[string]any{"reasoning_tokens": reasoningTokens},
-		"total_tokens":          total,
+		"output_tokens": usage.Output,
+		"total_tokens":  total,
 	}
+	if usage.Reasoning != nil {
+		result["output_tokens_details"] = map[string]any{"reasoning_tokens": *usage.Reasoning}
+	}
+	return result
 }
 
 func outputFromMessage(message *llm.AssistantMessage) ([]any, error) {
