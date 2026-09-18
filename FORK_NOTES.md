@@ -53,6 +53,14 @@ validator. Existing image-history restrictions remain.
 
 ## Kimi Code
 
+The container log records a `devin_route` JSON line per upstream routing attempt:
+`client_model`, `reasoning_effort`, `upstream_model`, and `status`. Empty effort
+means the client supplied no explicit nonempty effort. `selected` records the
+request target before the upstream call; it does not prove successful generation
+or expose the model's internal reasoning budget. `rejected` has no upstream target.
+No prompts, message bodies, tools, or credentials are included. Full debug logging
+is not required. Use `docker logs --timestamps --since 5m devin-2api` to inspect.
+
 Use `type = "openai"` and the Chat Completions endpoint. Choose one of
 `swe-2-medium`, `swe-2-high`, `swe-2-max`, or send an explicit supported
 `reasoning_effort`. A UI toggle must not be interpreted as a guaranteed way to

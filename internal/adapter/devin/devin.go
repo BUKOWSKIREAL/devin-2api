@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -110,8 +111,10 @@ func (adapter *Adapter) Stream(ctx context.Context, request llm.RequestMessages)
 	cfg.Model = model
 	protoRequest, err := buildRequest(request, cfg)
 	if err != nil {
+		writeRouteLog(log.Default(), request.Model, request.Generation.ReasoningEffort, "", "rejected")
 		return nil, err
 	}
+	writeRouteLog(log.Default(), request.Model, request.Generation.ReasoningEffort, protoRequest.GetChatModelUid(), "selected")
 	recorder := debuglog.FromContext(ctx)
 	recordProtoJSON(recorder, "03-devin-request.json", protoRequest)
 	stream, err := adapter.client.GetChatMessage(ctx, connect.NewRequest(protoRequest))
