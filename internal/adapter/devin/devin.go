@@ -391,6 +391,10 @@ func reasoningModel(model, effort string) (string, error) {
 	case "swe-2", "swe-2-medium", "swe-2-high", "swe-2-max":
 		switch effort {
 		case "medium", "high", "max":
+			// 显式 Max 模型优先，避免客户端隐式默认 medium 降低用户选择的档位。
+			if model == "swe-2-max" {
+				return model, nil
+			}
 			return "swe-2-" + effort, nil
 		}
 	}

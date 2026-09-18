@@ -97,6 +97,29 @@ func TestUnsupportedReasoningAndInvalidHistoryFail(t *testing.T) {
 	}
 }
 
+// TestExplicitMaxCannotBeDowngraded 覆盖 Kimi 实际发送 Max 模型加 medium 参数的冲突。
+func TestExplicitMaxCannotBeDowngraded(t *testing.T) {
+	for _, effort := range []string{"", "medium", "high", "max"} {
+		decoded, err := chat.DecodeRequest([]byte(`{"model":"swe-2-max","reasoning_effort":"` + effort + `","messages":[{"role":"user","content":"hello"}]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := buildRequest(decoded.Context, Config{Model: decoded.Context.Model})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.GetChatModelUid() != "swe-2-max" {
+			t.Fatalf("effort %q downgraded explicit Max to %q", effort, got.GetChatModelUid())
+		}
+	}
+	if _, err := reasoningModel("swe-2-max", "off"); err == nil {
+		t.Fatal("unsupported effort silently accepted")
+	}
+	if got, err := reasoningModel("swe-2-high", "medium"); err != nil || got != "swe-2-medium" {
+		t.Fatal("other model routing changed")
+	}
+}
+
 func TestUnsupportedControlsFailExplicitly(t *testing.T) {
 	for _, extra := range []string{`"stop":["END"]`, `"response_format":{"type":"json_object"}`, `"parallel_tool_calls":true`, `"max_tokens":0`, `"temperature":-1`, `"top_p":2`} {
 		_, err := chat.DecodeRequest([]byte(`{"model":"swe-2-high","messages":[{"role":"user","content":"hi"}],` + extra + `}`))

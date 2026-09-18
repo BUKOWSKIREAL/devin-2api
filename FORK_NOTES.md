@@ -39,7 +39,7 @@ Anthropic feature.
 | `temperature`, `top_p` | Forwarded on all three protocols |
 | Messages `top_k` | Forwarded |
 | `tool_choice` | auto / none / required (Messages any), or a named function, mapped to native tool choice |
-| Chat `reasoning_effort`, Responses `reasoning.effort` | SWE-2 only: medium / high / max selects the corresponding `swe-2-*` UID; explicit effort overrides the UID suffix |
+| Chat `reasoning_effort`, Responses `reasoning.effort` | SWE-2 only: medium / high / max selects the corresponding UID, except explicit `swe-2-max` stays Max even when the client sends medium/high |
 | SWE-2 off / none / low / xhigh, or effort on another model | HTTP 400; never silently treated as another effort |
 | Stop sequences, response formatting, parallel tool controls | HTTP 400 when supplied; exact upstream semantics have not been verified |
 | Responses `previous_response_id`, `text`, reasoning summaries | HTTP 400; send full history instead |
@@ -66,6 +66,11 @@ Use `type = "openai"` and the Chat Completions endpoint. Choose one of
 `reasoning_effort`. A UI toggle must not be interpreted as a guaranteed way to
 disable SWE-2 reasoning. Kimi Code version-specific effort UI configuration is
 separate from this gateway change.
+
+Explicit `swe-2-max` is pinned to Max: a client-default `reasoning_effort: medium`
+cannot downgrade it. Invalid efforts such as `off` still return 400. To use
+Medium/High, select a different model UID. Routing logs retain the original
+client effort and show the final `swe-2-max` target, so the override is visible.
 
 ## Build and validation
 
