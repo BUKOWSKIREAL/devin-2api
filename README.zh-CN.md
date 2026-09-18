@@ -1,5 +1,8 @@
 # devin-2api
 
+> **BUKOWSKIREAL 修复分支：** 提示词保留、工具参数说明、生成控制和推理历史修复见
+> [FORK_NOTES.md](FORK_NOTES.md)。请构建本仓库；下文原作者 Docker Hub 镜像不包含这些修复。
+
 > [English](README.md) | **中文**
 
 devin-2api 是一个轻量的 [OpenAI Responses API](https://platform.openai.com/docs/api-reference/responses) 转发工具。它对外暴露标准的 `/v1/responses` 接口，通过适配器把你的 LLM 请求透明转发到 Devin（[app.devin.ai](https://app.devin.ai/)）——让外部程序可以通过标准的 OpenAI 协议调用 Devin 内部的模型。

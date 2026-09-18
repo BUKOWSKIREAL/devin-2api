@@ -1,5 +1,9 @@
 # devin-2api
 
+> **BUKOWSKIREAL fork:** request-fidelity fixes and current protocol limitations
+> are documented in [FORK_NOTES.md](FORK_NOTES.md). Build this fork to use the
+> fixes; the upstream Docker Hub image below does not include them.
+
 > **English** | [中文](README.zh-CN.md)
 
 devin-2api is a lightweight forwarding tool for the [OpenAI Responses API](https://platform.openai.com/docs/api-reference/responses). It exposes a standard `/v1/responses` endpoint and transparently forwards your LLM requests to Devin ([app.devin.ai](https://app.devin.ai/)) through an adapter — letting external programs call Devin's models through the standard OpenAI protocol.

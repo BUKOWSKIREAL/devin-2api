@@ -32,6 +32,15 @@ type Request struct {
 	Temperature *float64 `json:"temperature,omitempty"`
 	// PreviousResponseID 是上游 Responses 会话关联标识。
 	PreviousResponseID string `json:"previous_response_id,omitempty"`
+	// TopP 是核采样概率。
+	TopP *float64 `json:"top_p,omitempty"`
+	// ToolChoice 是本次工具选择约束。
+	ToolChoice json.RawMessage `json:"tool_choice,omitempty"`
+	// Reasoning 是调用方显式指定的推理配置。
+	Reasoning struct {
+		// Effort 是请求的思考档位。
+		Effort string `json:"effort"`
+	} `json:"reasoning,omitempty"`
 }
 
 // Tool 是 OpenAI Responses function 工具定义。
@@ -78,6 +87,16 @@ func DecodeRequest(data []byte) (AdaptedRequest, error) {
 	}
 
 	context := llm.RequestMessages{Model: request.Model, SystemPrompt: request.Instructions}
+	if err := common.RejectUnsupported(data, "previous_response_id", "text", "parallel_tool_calls"); err != nil {
+		return AdaptedRequest{}, err
+	}
+	var raw map[string]json.RawMessage
+	_ = json.Unmarshal(data, &raw)
+	if common.HasValue(raw["reasoning"]) {
+		if err := common.RejectUnsupported(raw["reasoning"], "summary", "generate_summary"); err != nil {
+			return AdaptedRequest{}, err
+		}
+	}
 	if err := appendInputMessages(&context, request.Input); err != nil {
 		return AdaptedRequest{}, err
 	}
@@ -95,6 +114,11 @@ func DecodeRequest(data []byte) (AdaptedRequest, error) {
 			InputSchema: schema,
 		})
 	}
+	choice, err := common.DecodeToolChoice(request.ToolChoice)
+	if err != nil {
+		return AdaptedRequest{}, err
+	}
+	context.Generation = llm.GenerationOptions{MaxOutputTokens: request.MaxOutputTokens, Temperature: request.Temperature, TopP: request.TopP, ToolChoice: choice, ReasoningEffort: request.Reasoning.Effort}
 	if err := context.Validate(); err != nil {
 		return AdaptedRequest{}, fmt.Errorf("validate adapted request: %w", err)
 	}

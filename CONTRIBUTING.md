@@ -1,5 +1,9 @@
 # Contributing
 
+> Fork behavior supersedes the historical tool-sanitizing section below:
+> see [FORK_NOTES.md](FORK_NOTES.md). Complete descriptions and schemas are now
+> retained in a tool-reference section alongside compatible native tool fields.
+
 Thanks for considering contributing to `devin-2api`. This guide covers the architecture, the dev environment, and how to submit changes.
 
 > **English** | [中文](CONTRIBUTING.zh-CN.md)

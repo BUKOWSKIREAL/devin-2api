@@ -26,6 +26,8 @@ type Request struct {
 	TopP                *float64        `json:"top_p,omitempty"`
 	Stop                json.RawMessage `json:"stop,omitempty"`
 	ResponseFormat      json.RawMessage `json:"response_format,omitempty"`
+	// ReasoningEffort 交给上游适配器按模型映射。
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // Message 是 Chat Completions 消息条目。
@@ -35,6 +37,8 @@ type Message struct {
 	Name       string          `json:"name,omitempty"`
 	ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
 	ToolCallID string          `json:"tool_call_id,omitempty"`
+	// ReasoningContent 保留客户端回放的推理正文。
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 // ToolCall 是助手消息中的工具调用（也用于流式增量）。
@@ -89,6 +93,9 @@ func DecodeRequest(data []byte) (AdaptedRequest, error) {
 	if err := decoder.Decode(&request); err != nil {
 		return AdaptedRequest{}, fmt.Errorf("decode chat request: %w", err)
 	}
+	if err := common.RejectUnsupported(data, "stop", "response_format", "parallel_tool_calls"); err != nil {
+		return AdaptedRequest{}, err
+	}
 	if request.Model == "" {
 		return AdaptedRequest{}, errors.New("chat request model is required")
 	}
@@ -114,13 +121,17 @@ func DecodeRequest(data []byte) (AdaptedRequest, error) {
 			InputSchema: schema,
 		})
 	}
-	if err := context.Validate(); err != nil {
-		return AdaptedRequest{}, fmt.Errorf("validate adapted request: %w", err)
-	}
-
 	maxTokens := request.MaxCompletionTokens
 	if maxTokens == nil {
 		maxTokens = request.MaxTokens
+	}
+	choice, err := common.DecodeToolChoice(request.ToolChoice)
+	if err != nil {
+		return AdaptedRequest{}, err
+	}
+	context.Generation = llm.GenerationOptions{MaxOutputTokens: maxTokens, Temperature: request.Temperature, TopP: request.TopP, ReasoningEffort: request.ReasoningEffort, ToolChoice: choice}
+	if err := context.Validate(); err != nil {
+		return AdaptedRequest{}, fmt.Errorf("validate adapted request: %w", err)
 	}
 	return AdaptedRequest{
 		Context: context,
@@ -205,6 +216,9 @@ func decodeUserContent(raw json.RawMessage) ([]llm.Content, error) {
 
 func decodeAssistantContent(message Message) ([]llm.Content, error) {
 	var content []llm.Content
+	if message.ReasoningContent != "" {
+		content = append(content, llm.ThinkingContent{Thinking: message.ReasoningContent})
+	}
 	if len(bytes.TrimSpace(message.Content)) > 0 && !bytes.Equal(bytes.TrimSpace(message.Content), []byte("null")) {
 		decoded, err := common.DecodeContent(message.Content)
 		if err != nil {
@@ -218,7 +232,7 @@ func decodeAssistantContent(message Message) ([]llm.Content, error) {
 		}
 		args := json.RawMessage(call.Function.Arguments)
 		if !llmIsJSONObject(args) {
-			args = json.RawMessage(`{}`)
+			return nil, fmt.Errorf("tool call %q arguments must be a JSON object", call.ID)
 		}
 		content = append(content, llm.ToolCall{
 			ID:        call.ID,

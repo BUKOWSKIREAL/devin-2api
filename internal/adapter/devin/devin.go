@@ -120,7 +120,7 @@ func (adapter *Adapter) Stream(ctx context.Context, request llm.RequestMessages)
 		// 透传上游 Connect 错误原文，不包一层模糊前缀。
 		return nil, connectError(err)
 	}
-	return &responseStream{upstream: stream, decoder: newResponseDecoder(model), recorder: recorder}, nil
+	return &responseStream{upstream: stream, decoder: newResponseDecoder(protoRequest.GetChatModelUid()), recorder: recorder}, nil
 }
 
 // validateImagesForModel 在本地尽早拒绝「无视觉能力模型 + 图片」组合，错误信息对客户端可读。
@@ -278,6 +278,13 @@ func (transport *authTransport) RoundTrip(request *http.Request) (*http.Response
 }
 
 func buildRequest(request llm.RequestMessages, config Config) (*devinproto.GetChatMessageRequest, error) {
+	if err := request.Validate(); err != nil {
+		return nil, fmt.Errorf("validate Devin request: %w", err)
+	}
+	model, err := reasoningModel(config.Model, request.Generation.ReasoningEffort)
+	if err != nil {
+		return nil, err
+	}
 	fingerprint, err := randomHex(366)
 	if err != nil {
 		return nil, fmt.Errorf("generate Devin device fingerprint: %w", err)
@@ -297,13 +304,12 @@ func buildRequest(request llm.RequestMessages, config Config) (*devinproto.GetCh
 	}
 	result := &devinproto.GetChatMessageRequest{
 		Metadata:     metadata,
-		Prompt:       proto.String(withToolDescriptions(request.SystemPrompt, request.Tools)),
-		ChatModelUid: proto.String(config.Model),
+		Prompt:       proto.String(withToolDocumentation(request.SystemPrompt, request.Tools)),
+		ChatModelUid: proto.String(model),
 		RequestType:  devinproto.ChatMessageRequestType_CHAT_MESSAGE_REQUEST_TYPE_CASCADE.Enum(),
 		Configuration: &devinproto.ExaCodeiumCommonPb_CompletionConfiguration{
 			NumCompletions: proto.Uint64(1),
 			MaxTokens:      proto.Uint64(128000),
-			MaxNewlines:    proto.Uint64(400),
 			Temperature:    proto.Float64(1),
 			TopK:           proto.Uint64(40),
 			TopP:           proto.Float64(0.95),
@@ -316,6 +322,35 @@ func buildRequest(request llm.RequestMessages, config Config) (*devinproto.GetCh
 		CascadeId:   proto.String(cascadeID),
 		PlannerMode: devinproto.ExaCodeiumCommonPb_ConversationalPlannerMode_ExaCodeiumCommonPb_ConversationalPlannerMode_CONVERSATIONAL_PLANNER_MODE_DEFAULT.Enum(),
 		ExecutionId: proto.String(executionID),
+	}
+	options := request.Generation
+	if options.MaxOutputTokens != nil {
+		result.Configuration.MaxTokens = proto.Uint64(uint64(*options.MaxOutputTokens))
+	}
+	if options.Temperature != nil {
+		result.Configuration.Temperature = proto.Float64(*options.Temperature)
+	}
+	if options.TopP != nil {
+		result.Configuration.TopP = proto.Float64(*options.TopP)
+	}
+	if options.TopK != nil {
+		result.Configuration.TopK = proto.Uint64(uint64(*options.TopK))
+	}
+	if choice := options.ToolChoice; choice != nil {
+		if choice.Mode == "named" {
+			found := false
+			for _, tool := range request.Tools {
+				if tool.Name == choice.Name {
+					found = true
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("invalid_argument: tool_choice references unknown tool %q", choice.Name)
+			}
+			result.ToolChoice = &devinproto.ExaChatPb_ChatToolChoice{Choice: &devinproto.ExaChatPb_ChatToolChoice_ToolName{ToolName: choice.Name}}
+		} else {
+			result.ToolChoice = &devinproto.ExaChatPb_ChatToolChoice{Choice: &devinproto.ExaChatPb_ChatToolChoice_OptionName{OptionName: choice.Mode}}
+		}
 	}
 	// Devin/Cascade 只可靠接受「当前轮」图片；历史图进 Images 会 invalid_argument。
 	// 当前轮 = 最后一条 AssistantMessage 之后的所有 user/tool 消息。
@@ -342,6 +377,21 @@ func buildRequest(request llm.RequestMessages, config Config) (*devinproto.GetCh
 		result.Tools = append(result.Tools, converted)
 	}
 	return result, nil
+}
+
+// reasoningModel 只映射已知 SWE-2 档位；无法表达的控制明确拒绝。
+func reasoningModel(model, effort string) (string, error) {
+	if effort == "" {
+		return model, nil
+	}
+	switch model {
+	case "swe-2", "swe-2-medium", "swe-2-high", "swe-2-max":
+		switch effort {
+		case "medium", "high", "max":
+			return "swe-2-" + effort, nil
+		}
+	}
+	return "", fmt.Errorf("invalid_argument: reasoning_effort %q is not supported for model %q; SWE-2 supports medium, high, max", effort, model)
 }
 
 // convertMessage 将中间消息转为 Devin ChatMessagePrompt。

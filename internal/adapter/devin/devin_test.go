@@ -67,7 +67,7 @@ func TestBuildRequestMapsLoopMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantPrompt := "system\n\n# tools descriptions\n<tool name=\"exec\">\n1. run\n</tool>\n<tool name=\"read\">\n1. read file\n</tool>"
+	wantPrompt := withToolDocumentation("system", request.Tools)
 	if converted.GetPrompt() != wantPrompt || converted.GetChatModelUid() != "model" {
 		t.Fatalf("top-level request = %#v", converted)
 	}
@@ -123,8 +123,8 @@ func TestBuildRequestMapsLoopMessages(t *testing.T) {
 	if converted.ProviderSource != nil {
 		t.Fatalf("provider source = %v, want absent", converted.GetProviderSource())
 	}
-	if converted.GetConfiguration().GetMaxNewlines() != 400 {
-		t.Fatalf("max newlines = %d, want 400", converted.GetConfiguration().GetMaxNewlines())
+	if converted.GetConfiguration().MaxNewlines != nil {
+		t.Fatalf("unexpected hardcoded newline limit: %d", converted.GetConfiguration().GetMaxNewlines())
 	}
 }
 
@@ -259,7 +259,7 @@ func TestBuildRequestIgnoresEmptyToolDescriptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "system\n\n# tools descriptions\n<tool name=\"read\">\n1. read a file\n</tool>"
+	want := withToolDocumentation("system\n", request.Tools)
 	if converted.GetPrompt() != want {
 		t.Fatalf("prompt = %q, want %q", converted.GetPrompt(), want)
 	}

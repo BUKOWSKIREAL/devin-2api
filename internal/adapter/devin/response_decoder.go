@@ -4,6 +4,7 @@ package devin
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -300,7 +301,7 @@ func (decoder *responseDecoder) complete(reason llm.StopReason) []llm.ResponseEv
 		// 在结束时一次性把 Builder 中的完整参数转成 JSON，避免中间反复解析/拷贝。
 		state.call.Arguments = json.RawMessage(state.arguments.String())
 		if !isJSONObject(state.call.Arguments) {
-			state.call.Arguments = json.RawMessage(`{}`)
+			return decoder.fail(fmt.Errorf("upstream tool call %q returned invalid JSON object arguments", state.call.ID))
 		}
 		decoder.partial.Content[state.contentIdx] = state.call
 		events = append(events, llm.ResponseEvent{Type: llm.ResponseEventToolCallEnd, ContentIndex: state.contentIdx, ToolCall: &state.call, Partial: &decoder.partial})

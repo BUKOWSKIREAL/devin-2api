@@ -82,6 +82,9 @@ func DecodeRequest(data []byte) (AdaptedRequest, error) {
 	}
 
 	context := llm.RequestMessages{Model: request.Model}
+	if err := common.RejectUnsupported(data, "stop_sequences", "thinking", "output_config"); err != nil {
+		return AdaptedRequest{}, err
+	}
 	if len(bytes.TrimSpace(request.System)) > 0 && !bytes.Equal(bytes.TrimSpace(request.System), []byte("null")) {
 		if err := appendSystem(&context, request.System); err != nil {
 			return AdaptedRequest{}, err
@@ -101,6 +104,11 @@ func DecodeRequest(data []byte) (AdaptedRequest, error) {
 			InputSchema: schema,
 		})
 	}
+	choice, err := common.DecodeToolChoice(request.ToolChoice)
+	if err != nil {
+		return AdaptedRequest{}, err
+	}
+	context.Generation = llm.GenerationOptions{MaxOutputTokens: &request.MaxTokens, Temperature: request.Temperature, TopP: request.TopP, TopK: request.TopK, ToolChoice: choice}
 	if err := context.Validate(); err != nil {
 		return AdaptedRequest{}, fmt.Errorf("validate adapted request: %w", err)
 	}
@@ -266,6 +274,10 @@ func decodeAssistantContent(raw json.RawMessage) ([]llm.Content, error) {
 			ID    string          `json:"id"`
 			Name  string          `json:"name"`
 			Input json.RawMessage `json:"input"`
+			// Thinking 是 Anthropic 历史思考块的正文。
+			Thinking string `json:"thinking"`
+			// Signature 是需原样回放的思考签名。
+			Signature string `json:"signature"`
 		}
 		if err := json.Unmarshal(part, &header); err != nil {
 			return nil, fmt.Errorf("content[%d]: %w", index, err)
@@ -274,13 +286,9 @@ func decodeAssistantContent(raw json.RawMessage) ([]llm.Content, error) {
 		case "text":
 			content = append(content, llm.TextContent{Text: header.Text})
 		case "thinking":
-			// 历史中的 thinking 块不需要签名。
-			content = append(content, llm.ThinkingContent{Thinking: header.Text})
+			content = append(content, llm.ThinkingContent{Thinking: header.Thinking, ThinkingSignature: header.Signature})
 		case "tool_use":
 			args := header.Input
-			if len(args) == 0 {
-				args = json.RawMessage(`{}`)
-			}
 			content = append(content, llm.ToolCall{ID: header.ID, Name: header.Name, Arguments: args})
 		default:
 			continue
